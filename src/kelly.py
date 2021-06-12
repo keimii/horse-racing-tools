@@ -196,7 +196,6 @@ class Simulator(object):
 
             p_idx += 1
 
-        print(result)
         return result
 
     def _calculate_purchase_amount(self, df, current_amount):
