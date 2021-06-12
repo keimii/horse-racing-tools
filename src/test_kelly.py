@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-import src.kelly as kl
+import kelly as kl
 
 
 class KellyFormulaTest(unittest.TestCase):
@@ -126,9 +126,9 @@ class KellySumulatorTest(unittest.TestCase):
 
         np.testing.assert_array_equal(
             [
-                [1, "2021-03-01", 4, 1, 10800.0, 129150.0, 118350.0, 1118350.0],
-                [2, "2021-03-02", 4, 0, 23300.0, 0.0, -23300.0, 1095050.0],
-                [3, "2021-03-02", 1, 0, 43800.0, 0.0, -43800.0, 1051250.0],
+                [1, "2021-03-01", 4, 1, 11000.0, 131200.0, 120200.0, 1120200.0],
+                [2, "2021-03-02", 4, 0, 23600.0, 0.0, -23600.0, 1096600.0],
+                [3, "2021-03-02", 1, 0, 43900.0, 0.0, -43900.0, 1052700.0],
             ],
             result,
         )

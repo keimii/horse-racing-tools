@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-import src.horse_combination as hc
+import horse_combination as hc
 
 
 class HorseCombinationTest(unittest.TestCase):

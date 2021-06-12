@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from src.raffine import Raffine
+from raffine import Raffine
 
 
 class KellySimpleFormula(object):
@@ -179,7 +179,7 @@ class Simulator(object):
             hit_num = merged[merged.payoff > 0].shape[0]
             income = total_payoff_amount - total_purchase_amount
 
-            current_amount = current_amount + income
+            current_amount += income
 
             result.append(
                 [
@@ -211,9 +211,18 @@ class Simulator(object):
             win_proba=win_proba, odds=rf.synthetic_odds, coef=self.coef
         )
 
-        bet_amount = math.floor(current_amount * bet_rate)
+        bet_amount = 0
+        if current_amount > 0:
+            bet_amount = math.floor(current_amount * bet_rate)
 
-        rf_ret["bet_rate"] = (rf_ret["raffine_coef"] * bet_amount / 100).apply(np.floor)
+        rf_ret["bet_rate"] = rf_ret["raffine_coef"] * bet_amount / 100
+        rf_ret.loc[rf_ret["bet_rate"] >= 1, "bet_rate"] = rf_ret.loc[
+            rf_ret["bet_rate"] >= 1, "bet_rate"
+        ].apply(np.round)
+        # 可能性がある場合は最低100円は賭けるようにceilとする
+        rf_ret.loc[rf_ret["bet_rate"] < 1, "bet_rate"] = rf_ret.loc[
+            rf_ret["bet_rate"] < 1, "bet_rate"
+        ].apply(np.ceil)
 
         zero_ticket = rf_ret[rf_ret.bet_rate < 1]
 

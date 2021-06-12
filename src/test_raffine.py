@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-import src.raffine as rf
+import raffine as rf
 
 
 class RaffineTest(unittest.TestCase):
