@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-import probability_calculation as pc
+import src.probability_calculation as pc
 
 
 class ProbabilityCalculationTest(unittest.TestCase):
