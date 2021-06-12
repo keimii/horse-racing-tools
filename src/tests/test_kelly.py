@@ -56,6 +56,31 @@ class KellySimpleFormulaTest(unittest.TestCase):
         self.assertEqual(0.123, result)
 
 
+class KellyCriterionTest(unittest.TestCase):
+    def setUp(self):
+        # 初期化処理
+        pass
+
+    def tearDown(self):
+        # 終了処理
+        pass
+
+    def test_kelly_formula(self):
+        result = kl.KellyCriterion.calculate(win_proba=0.5, odds=3, coef=1)
+
+        self.assertEqual(0.25, result)
+
+    def test_half_kelly_formula(self):
+        result = kl.KellyCriterion.calculate(win_proba=0.5, odds=3, coef=2)
+
+        self.assertEqual(0.125, result)
+
+    def test_minus_expectation(self):
+        result = kl.KellyCriterion.calculate(win_proba=0.49, odds=2, coef=2)
+
+        self.assertEqual(0, result)
+
+
 class KellySumulatorTest(unittest.TestCase):
     def setUp(self):
         df = pd.DataFrame(

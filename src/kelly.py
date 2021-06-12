@@ -73,6 +73,38 @@ class KellyFormula(object):
         return math.ceil((bet_rate / coef) * 1000) / 1000
 
 
+class KellyCriterion(object):
+    """
+    ケリー基準に基づいて適切な掛け率を計算する
+    """
+
+    @classmethod
+    def calculate(cls, win_proba, odds, coef):
+        """
+        Parameters
+        ----------
+        win_proba : float
+            予想勝利確率
+        odds : float
+            オッズ
+        coef : int
+            ハーフケリーにしたい場合、2を指定する
+
+        Returns
+        -------
+        rate : float
+            賭け率
+        """
+
+        profit = odds - 1
+        bet_rate = (win_proba * (profit + 1) - 1) / profit
+
+        if bet_rate < 0:
+            return 0
+
+        return math.ceil((bet_rate / coef) * 1000) / 1000
+
+
 class Simulator(object):
     """
     ケリーの公式を使ってシミュレーションする
@@ -200,4 +232,4 @@ class Simulator(object):
             return KellySimpleFormula
 
         if self.kelly_type == "kelly_criterion":
-            return None
+            return KellyCriterion
