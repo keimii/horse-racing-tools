@@ -196,6 +196,7 @@ class Simulator(object):
 
             p_idx += 1
 
+        print(result)
         return result
 
     def _calculate_purchase_amount(self, df, current_amount):
@@ -218,7 +219,7 @@ class Simulator(object):
         rf_ret["bet_rate"] = rf_ret["raffine_coef"] * bet_amount / 100
         rf_ret.loc[rf_ret["bet_rate"] >= 1, "bet_rate"] = rf_ret.loc[
             rf_ret["bet_rate"] >= 1, "bet_rate"
-        ].apply(np.round)
+        ].apply(np.floor)
         # 可能性がある場合は最低100円は賭けるようにceilとする
         rf_ret.loc[rf_ret["bet_rate"] < 1, "bet_rate"] = rf_ret.loc[
             rf_ret["bet_rate"] < 1, "bet_rate"
