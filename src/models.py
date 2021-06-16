@@ -1,30 +1,35 @@
 import lightgbm as lgb
 import numpy as np
+import optuna.integration.lightgbm as tuner
 import pandas as pd
 from imblearn.under_sampling import RandomUnderSampler
 from sklearn.metrics import log_loss, mean_absolute_error, mean_squared_error
 from sklearn.model_selection import KFold
 
 
+def split_train_and_validation(dataset, fold):
+    race_id = dataset.race_id
+    unique_race_ids = race_id.unique()
+    kf = KFold(n_splits=fold, shuffle=True, random_state=71)
+    X_train = None
+    X_val = None
+    for tr_group_idx, va_group_idx in kf.split(unique_race_ids):
+        tr_groups, va_groups = (
+            unique_race_ids[tr_group_idx],
+            unique_race_ids[va_group_idx],
+        )
+        is_tr, is_va = race_id.isin(tr_groups), race_id.isin(va_groups)
+        X_train, X_val = dataset[is_tr], dataset[is_va]
+        break
+
+    return X_train, X_val
+
+
 def calibration(y_proba, beta):
     return y_proba / (y_proba + (1 - y_proba) / beta)
 
 
-class LightGBMCV(object):
-    def __init__(self, parameter, meta_cols, category_columns, under_sampling=False):
-        self.paramter = parameter
-        self.category_columns = category_columns
-        self.meta_cols = meta_cols
-        self.evaluation_results = dict()
-        self.scores = []
-        self.lgbm_models = []
-        self.under_sampling = under_sampling
-
-    def _split_train_label(self, dataset, label_cols):
-        label = pd.DataFrame(dataset[label_cols])
-        train = dataset.drop([label_cols], axis=1)
-        return train, label
-
+class LightGBMInterface(object):
     def under_sampler(
         self, X_train, train_label, X_val, category_columns, random_state
     ):
@@ -57,6 +62,79 @@ class LightGBMCV(object):
         X_val[category_columns] = X_val[category_columns].astype("category")
 
         return X_train_sampled, train_label_sampled, X_val
+
+    def _split_train_label(self, dataset, label_cols):
+        label = pd.DataFrame(dataset[label_cols])
+        train = dataset.drop([label_cols], axis=1)
+        return train, label
+
+
+class LightGBMTuner(LightGBMInterface):
+    def __init__(self, parameter, meta_cols, category_columns, under_sampling=False):
+        self.paramter = parameter
+        self.category_columns = category_columns
+        self.meta_cols = meta_cols
+        self.evaluation_results = dict()
+        self.under_sampling = under_sampling
+
+    def train(self, fold, dataset, label_name):
+        race_id = dataset.race_id
+        unique_race_ids = race_id.unique()
+        kf = KFold(n_splits=fold, shuffle=True, random_state=71)
+        X_train = None
+        X_val = None
+        for tr_group_idx, va_group_idx in kf.split(unique_race_ids):
+            tr_groups, va_groups = (
+                unique_race_ids[tr_group_idx],
+                unique_race_ids[va_group_idx],
+            )
+            is_tr, is_va = race_id.isin(tr_groups), race_id.isin(va_groups)
+            X_train, X_val = dataset[is_tr], dataset[is_va]
+            break
+
+        X_train, train_label = self._split_train_label(X_train, label_name)
+        X_val, val_label = self._split_train_label(X_val, label_name)
+
+        if self.under_sampling:
+            X_train, train_label, X_val = self.under_sampler(
+                X_train, train_label, X_val, self.category_columns, 123
+            )
+        else:
+            X_train[self.category_columns] = X_train[self.category_columns].astype(
+                "category"
+            )
+            X_val[self.category_columns] = X_val[self.category_columns].astype(
+                "category"
+            )
+
+        X_train = X_train.drop(self.meta_cols, axis=1, errors="ignore")
+        X_val = X_val.drop(self.meta_cols, axis=1, errors="ignore")
+
+        lgb_train = lgb.Dataset(X_train, train_label)
+        lgb_valid = lgb.Dataset(X_val, val_label, reference=lgb_train)
+
+        lgbm = tuner.train(
+            self.paramter,
+            lgb_train,
+            valid_sets=[lgb_train, lgb_valid],
+            early_stopping_rounds=100,
+            verbose_eval=0,
+            evals_result=self.evaluation_results,
+            valid_names=["Train", "Test"],
+        )
+
+        return lgbm, lgbm.params
+
+
+class LightGBMCV(LightGBMInterface):
+    def __init__(self, parameter, meta_cols, category_columns, under_sampling=False):
+        self.paramter = parameter
+        self.category_columns = category_columns
+        self.meta_cols = meta_cols
+        self.evaluation_results = dict()
+        self.scores = []
+        self.lgbm_models = []
+        self.under_sampling = under_sampling
 
     def cv(self, fold, dataset, label_name):
         preds_df = pd.DataFrame()
