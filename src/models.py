@@ -29,7 +29,120 @@ def calibration(y_proba, beta):
     return y_proba / (y_proba + (1 - y_proba) / beta)
 
 
+class SmoothingTargetEncodingCV(object):
+    """
+    クロスバリデーション用のTarget Encording
+    データのリークを防ぐために、KFoldで分割してout-of-foldで変換した値に置換する
+    """
+
+    def __init__(self, columns, k=100):
+        self.columns = columns
+        self.train = None
+        self.target = None
+        self.val_train = None
+        self.target_mean = None
+        self.k = k
+
+    def _sigmoid(self, count):
+        return 1 / (1 + np.exp(-count / self.k))
+
+    def _smoothing(self, target):
+        averages = target.groupby(by="key")["target"].agg(["mean", "count"])
+        sig = self._sigmoid(averages["count"])
+        return self.target_mean * (1 - sig) + averages["mean"] * sig
+
+    def fit(self, train, target, val_train):
+        self.train = train
+        self.target = target
+        self.val_train = val_train
+        self.target_mean = target.mean()
+
+    def transform(self):
+        for col in self.columns:
+            # バリデーション用データはTrainセットを使ってTarget Encordingする
+            data_tmp = pd.DataFrame({"key": self.train[col], "target": self.target})
+            smoothing_values = self._smoothing(data_tmp)
+            self.val_train.loc[:, col] = self.val_train[col].map(smoothing_values)
+            self.val_train[col] = self.val_train[col].astype("float64")
+
+            # 訓練用データはKFoldでout-of-foldを使ってTarget Encordingする
+            tmp = np.repeat(np.nan, self.train.shape[0])
+            fold = 4
+            kf_encoding = KFold(n_splits=fold, shuffle=True, random_state=72)
+            for idx_1, idx_2 in kf_encoding.split(self.train):
+                # KFoldの訓練データで集計した値を
+                t_smoothing_values = self._smoothing(data_tmp.iloc[idx_1])
+                # テストデータ部分に置換することでout-of-foldを実現している
+                tmp[idx_2] = self.train[col].iloc[idx_2].map(t_smoothing_values)
+
+            self.train.loc[:, col] = tmp
+
+        return self.train, self.val_train
+
+
+class SmoothingTargetEncoding(object):
+    """
+    過去のデータを使ったTarget Encording
+    """
+
+    def __init__(self, columns, k=100):
+        self.columns = columns
+        self.from_dataset = None
+        self.target = None
+        self.to_dataset = None
+        self.target_mean = None
+        self.aggr_dict = {}
+        self.k = k
+
+    def _sigmoid(self, count):
+        return 1 / (1 + np.exp(-count / self.k))
+
+    def _smoothing(self, target):
+        averages = target.groupby(by="key")["target"].agg(["mean", "count"])
+        sig = self._sigmoid(averages["count"])
+        return self.target_mean * (1 - sig) + averages["mean"] * sig
+
+    def fit(self, from_dataset, target, to_dataset):
+        """
+        Parameters
+        ----------
+        from_dataset : pandas.DataFrame
+            集計元となるデータセット
+        target : pandas.DataFrame
+            集計元となるターゲット
+        to_dataset : pandas.DataFrame
+            置換したいデータセット
+        """
+        self.from_dataset = from_dataset
+        self.target = target
+        self.to_dataset = to_dataset
+        self.target_mean = target.mean()
+        self.aggr_dict = {}
+
+    def transform(self):
+        for col in self.columns:
+            # バリデーション用データはTrainセットを使ってTarget Encordingする
+            data_tmp = pd.DataFrame(
+                {"key": self.from_dataset[col], "target": self.target}
+            )
+            smoothing_values = self._smoothing(data_tmp)
+            self.to_dataset.loc[:, col] = self.to_dataset[col].map(smoothing_values)
+            self.to_dataset[col] = self.to_dataset[col].astype("float64")
+            # 他の場所で使いまわしたい場合のために返却しておく
+            self.aggr_dict[col] = smoothing_values
+
+        return self.to_dataset, self.aggr_dict
+
+
 class LightGBMInterface(object):
+    def target_encoding_cv(self, train, test, target_name, te_columns):
+        # Target Encording
+        ste = SmoothingTargetEncodingCV(te_columns)
+        ste.fit(train, train[target_name], test)
+        ste.transform()
+
+        return train, test
+
     def under_sampler(
         self, X_train, train_label, X_val, category_columns, random_state
     ):
@@ -70,11 +183,21 @@ class LightGBMInterface(object):
 
 
 class LightGBMTuner(LightGBMInterface):
-    def __init__(self, parameter, meta_cols, category_columns, under_sampling=False):
+    def __init__(
+        self,
+        parameter,
+        meta_cols=[],
+        category_columns=[],
+        target_encoding_columns=[],
+        target_encoding=False,
+        under_sampling=False,
+    ):
         self.paramter = parameter
         self.category_columns = category_columns
+        self.target_encoding_columns = target_encoding_columns
         self.meta_cols = meta_cols
         self.evaluation_results = dict()
+        target_encoding = target_encoding
         self.under_sampling = under_sampling
 
     def train(self, fold, dataset, label_name):
@@ -91,6 +214,12 @@ class LightGBMTuner(LightGBMInterface):
             is_tr, is_va = race_id.isin(tr_groups), race_id.isin(va_groups)
             X_train, X_val = dataset[is_tr], dataset[is_va]
             break
+
+        if self.target_encoding:
+            for h in self.target_encoding_columns:
+                X_train, X_val = self.target_encoding_cv(
+                    X_train, X_val, h["target"], h["columns"]
+                )
 
         X_train, train_label = self._split_train_label(X_train, label_name)
         X_val, val_label = self._split_train_label(X_val, label_name)
@@ -127,13 +256,23 @@ class LightGBMTuner(LightGBMInterface):
 
 
 class LightGBMCV(LightGBMInterface):
-    def __init__(self, parameter, meta_cols, category_columns, under_sampling=False):
+    def __init__(
+        self,
+        parameter,
+        meta_cols=[],
+        category_columns=[],
+        target_encoding_columns=[],
+        target_encoding=False,
+        under_sampling=False,
+    ):
         self.paramter = parameter
         self.category_columns = category_columns
+        self.target_encoding_columns = target_encoding_columns
         self.meta_cols = meta_cols
         self.evaluation_results = dict()
         self.scores = []
         self.lgbm_models = []
+        self.target_encoding = target_encoding
         self.under_sampling = under_sampling
 
     def cv(self, fold, dataset, label_name):
@@ -151,6 +290,12 @@ class LightGBMCV(LightGBMInterface):
             )
             is_tr, is_va = race_id.isin(tr_groups), race_id.isin(va_groups)
             X_train, X_val = dataset[is_tr], dataset[is_va]
+
+            if self.target_encoding:
+                for h in self.target_encoding_columns:
+                    X_train, X_val = self.target_encoding_cv(
+                        X_train, X_val, h["target"], h["columns"]
+                    )
 
             X_train, train_label = self._split_train_label(X_train, label_name)
             X_val, val_label = self._split_train_label(X_val, label_name)
