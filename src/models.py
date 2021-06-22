@@ -197,7 +197,7 @@ class LightGBMTuner(LightGBMInterface):
         self.target_encoding_columns = target_encoding_columns
         self.meta_cols = meta_cols
         self.evaluation_results = dict()
-        target_encoding = target_encoding
+        self.target_encoding = target_encoding
         self.under_sampling = under_sampling
 
     def train(self, fold, dataset, label_name):
